@@ -8,6 +8,7 @@
 /.cache
 /deno_modules
 
+# Node modules
 node_modules
 
 # Logs
@@ -15,6 +16,16 @@ node_modules
 
 # OS generated files
 .DS_Store
+Thumbs.db
 
+# Supabase
 supabase/.temp/
 supabase/.branches/
+
+# Sensitive files
+keys.json
+*.key
+*.pem
+key.base64
+service_account*.txt
+service_account*.json

@@ -11,35 +11,51 @@ if [ -z "$SUPABASE_ANON_KEY" ]; then
   exit 1
 fi
 
-echo "Testing ColorWorks Live Event Booking User template (39480325)..."
+# Check if SUPABASE_URL is set
+if [ -z "$SUPABASE_URL" ]; then
+  echo "Error: SUPABASE_URL is not set in .env file. Format: https://<project-ref>.supabase.co"
+  exit 1
+fi
 
-# Make request to the function
-curl -X POST "https://oouphgurrsruwvayrzte.supabase.co/functions/v1/send-unauthenticated-email" \
+# Set the Google Sheet ID
+# This is the actual Google Sheet ID to use
+SHEET_ID="1AqLYr4BI6UXWjGELSzs2NLagGsGwCiViwcXH5hBBack"
+
+# Format the function URL using SUPABASE_URL
+FUNCTION_URL="${SUPABASE_URL}/functions/v1/update-colorworks-google-sheet"
+
+echo "Testing Google Sheets API with appending rows..."
+echo "Using function URL: $FUNCTION_URL"
+
+# Test appending rows to a sheet
+curl -X POST "$FUNCTION_URL" \
   -H "Content-Type: application/json" \
-  -H "Origin: https://localhost:54321" \
   -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
-  -d '{
-    "templateId": "39480325",
-    "userEmail": "tim@formfilms.com",
-    "fromAddress": "team@formfilms.com",
-    "templateData": {
-      "name": "Tim Hunt",
-      "email": "tim@formfilms.com",
-      "phone_number": "555-123-4567",
-      "job_title": "Test Manager",
-      "organization_name": "Test Company",
-      "website_url": "https://www.formfilms.com",
-      "content_type": "Leadership Development",
-      "duration": "2 hours",
-      "estimated_attendees": 25,
-      "event_formats": ["Interactive Workshop", "Keynote"],
-      "event_group_type": "Corporate",
-      "event_types": ["Leadership Training"],
-      "location_type": "In person",
-      "city": "Test City",
-      "state": "Test State",
-      "event_date": "2025-04-15",
-      "company_name": "Form Films",
-      "company_address": "123 Test St, Test City, TS 12345"
-    }
-  }' 
+  -d "{
+    \"sheetId\": \"$SHEET_ID\",
+    \"tabName\": \"Sheet1\",
+    \"values\": [
+      {
+        \"name\": \"Test User\",
+        \"email\": \"test@example.com\",
+        \"date\": \"$(date +"%Y-%m-%d")\"
+      }
+    ],
+    \"append\": true
+  }"
+
+echo -e "\n\nTesting Google Sheets API with updating specific cells..."
+
+# Test updating specific cells
+curl -X POST "$FUNCTION_URL" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+  -d "{
+    \"sheetId\": \"$SHEET_ID\",
+    \"tabName\": \"Sheet1\",
+    \"values\": [
+      [0, 0, \"Last Updated: $(date)\"],
+      [0, 1, \"Test Update\"],
+      [0, 2, \"Success\"]
+    ]
+  }" 

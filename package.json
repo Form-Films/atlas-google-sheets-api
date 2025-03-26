@@ -7,6 +7,16 @@
     "lint": "biome check .",
     "lint:fix": "biome check --apply .",
     "format": "biome format .",
-    "format:fix": "biome format --write ."
+    "format:fix": "biome format --write .",
+    "deploy": "supabase functions deploy update-colorworks-google-sheet",
+    "test": "bash ./test-function.sh",
+    "test:deployed": "bash ./test-deployed-function.sh",
+    "sheet:create": "node create-sheet.js",
+    "sheet:test": "node test-sheet.js",
+    "sheet:update-id": "node update-sheet-id.js"
+  },
+  "dependencies": {
+    "google-auth-library": "^8.9.0",
+    "google-spreadsheet": "^3.3.0"
   }
 }
