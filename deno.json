@@ -1,0 +1,27 @@
+{
+  "version": "0.1.0",
+  "tasks": {
+    "start": "deno run -A --watch=supabase/functions/ dev.ts"
+  },
+  "compilerOptions": {
+    "allowJs": true,
+    "strict": true,
+    "lib": ["deno.ns", "deno.window", "esnext"],
+    "moduleResolution": "node"
+  },
+  "nodeModulesDir": true,
+  "lint": {
+    "files": {
+      "include": ["**/*.ts"]
+    },
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "imports": {
+    "@biomejs/biome": "npm:@biomejs/biome@^1.9.4",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.10.0",
+    "postmark": "npm:postmark@4.0.5"
+  },
+  "importMap": "./import_map.json"
+}
