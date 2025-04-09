@@ -153,8 +153,37 @@ type BulkAssessmentData = {
   numberOfAssessments: number;
 };
 
+// Match the frontend payload structure
 type LiveEventData = {
   dataType: 'live-event';
+  name: string;
+  email: string;
+  phoneNumber: string;
+  jobTitle: string;
+  organizationName: string;
+  websiteUrl: string;
+  estimatedAttendees: number;
+  desiredContentType?: string;
+  desiredDuration?: string;
+  desiredFormats?: string[];
+  specialEventInfo?: {
+    type: string;
+    eventTypes: string[];
+    userDefinedEventType?: string;
+  };
+  locationInfo?: {
+    type: string;
+    city?: string;
+    state?: string;
+    locationName?: string;
+  };
+  budget?: number;
+  eventDate?: string | { startDate: string; endDate: string };
+  interestedInBulkAssessments?: boolean;
+  referralInfo?: {
+    source: string;
+    moreInfo: string;
+  };
   [key: string]: unknown;
 };
 
@@ -337,14 +366,90 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.info("Formatted row for sheet:", values[0]);
       
     } else if (data.dataType === 'live-event') {
+      const eventData = data as LiveEventData;
+      
+      // Validate required fields for live events
+      const requiredFields = ['name', 'email', 'phoneNumber', 'estimatedAttendees'];
+      const missingFields = requiredFields.filter(field => !(field in eventData));
+      
+      if (missingFields.length > 0) {
+        console.error(`Missing required fields for live-event: ${missingFields.join(', ')}`);
+        return new Response(
+          JSON.stringify({ 
+            error: `Missing required fields: ${missingFields.join(', ')}` 
+          }),
+          { 
+            status: 400, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+          }
+        );
+      }
+      
       // Handle live event data
       tabName = "Live Events";
-      // Process live event data similarly to bulk assessment
-      // This is a placeholder - implement according to your requirements
+      
+      // Log the raw data for debugging
+      console.info("Raw live event data being processed:", JSON.stringify(eventData, null, 2));
+      
+      // Format event date
+      let formattedEventDate = "";
+      if (eventData.eventDate) {
+        if (typeof eventData.eventDate === 'string') {
+          formattedEventDate = eventData.eventDate;
+        } else {
+          formattedEventDate = `${eventData.eventDate.startDate} to ${eventData.eventDate.endDate}`;
+        }
+      }
+      
+      // Format event formats
+      const eventFormats = Array.isArray(eventData.desiredFormats) 
+        ? eventData.desiredFormats.join(", ") 
+        : "";
+      
+      // Format event types
+      const eventTypes = eventData.specialEventInfo?.eventTypes?.join(", ") || "";
+      
+      // Format location information
+      const locationType = eventData.locationInfo?.type || "";
+      const city = eventData.locationInfo?.city || "";
+      const state = eventData.locationInfo?.state || "";
+      const locationName = eventData.locationInfo?.locationName || "";
+      
+      // Format referral information
+      const referralSource = eventData.referralInfo?.source || "";
+      const referralInfo = eventData.referralInfo?.moreInfo || "";
+      
+      const timestamp = new Date().toISOString();
+      
+      // Create row with exact header names that match the Google Sheet
       values = [{
-        Timestamp: new Date().toISOString(),
-        // Add other fields as needed
+        "Name": eventData.name,
+        "Email": eventData.email,
+        "Phone Number": eventData.phoneNumber,
+        "Job Title": eventData.jobTitle || "",
+        "Organization": eventData.organizationName || "",
+        "Website": eventData.websiteUrl || "",
+        "Estimated Attendees": eventData.estimatedAttendees,
+        "Content Type": eventData.desiredContentType || "",
+        "Duration": eventData.desiredDuration || "",
+        "Event Formats": eventFormats,
+        "Event Group Type": eventData.specialEventInfo?.type || "",
+        "Event Types": eventTypes,
+        "Custom Event Type": eventData.specialEventInfo?.userDefinedEventType || "",
+        "Location Type": locationType,
+        "City": city,
+        "State": state,
+        "Location Name": locationName,
+        "Budget": eventData.budget?.toString() || "",
+        "Event Date": formattedEventDate,
+        "Interested In Bulk Assessments": eventData.interestedInBulkAssessments === true ? "Yes" : "No",
+        "Referral Source": referralSource,
+        "Referral Info": referralInfo,
+        "Submission Date": timestamp
       }];
+      
+      // Log the formatted row for debugging
+      console.info("Formatted row for live event:", JSON.stringify(values[0], null, 2));
     } else {
       console.error(`Unknown data type: ${data.dataType}`);
       return new Response(
