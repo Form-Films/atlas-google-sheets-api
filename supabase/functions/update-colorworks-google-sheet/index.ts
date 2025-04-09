@@ -19,6 +19,59 @@ type GoogleSpreadsheetType = {
   title: string;
 };
 
+// Data types definitions
+type EmailPayloadBase = {
+  name: string;
+  email: string;
+  phoneNumber: string;
+};
+
+type BulkAssessmentPayload = EmailPayloadBase & {
+  dataType: 'bulk-assessment';
+  numberOfAssessments: number;
+};
+
+type LiveEventPayload = EmailPayloadBase & {
+  dataType: 'live-event';
+  jobTitle: string;
+  organizationName: string;
+  websiteUrl: string;
+  estimatedAttendees: number;
+  desiredContentType?: string;
+  desiredDuration?: string;
+  desiredFormats?: string[];
+  specialEventInfo?: {
+    type: string;
+    eventTypes: string[];
+    userDefinedEventType?: string;
+  };
+  locationInfo?: {
+    type: 'virtual';
+  } | {
+    type: 'inPerson' | 'either';
+    city: string;
+    state: string;
+    locationName?: string;
+  };
+  budget?: number;
+  eventDate?: string | { startDate: string; endDate: string };
+  interestedInBulkAssessments?: boolean;
+  referralInfo: {
+    source: string;
+    moreInfo: string;
+  };
+};
+
+type UserSignupPayload = {
+  dataType: 'user-signup';
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  createdDate: string;
+};
+
+type DataPayload = BulkAssessmentPayload | LiveEventPayload | UserSignupPayload;
+
 // Import the actual packages/
 //@ts-expect-error
 const { GoogleSpreadsheet } = await import("npm:google-spreadsheet@3.3.0");
@@ -30,6 +83,31 @@ const { JWT } = await import("npm:google-auth-library@8.9.0");
 const RATE_LIMIT_NUM = 10; // Number of requests allowed
 const RATE_LIMIT_WINDOW_MS = 60000; // Time window in milliseconds (1 minute)
 const ipRequestMap = new Map<string, { count: number; resetTime: number }>();
+
+// Sheet tab names
+const BULK_ASSESSMENT_TAB = "Bulk Assessments";
+const LIVE_EVENT_TAB = "Live Events";
+const USER_SIGNUP_TAB = "User Signups";
+
+// Default Google Sheet ID from environment variable
+const DEFAULT_SHEET_ID = Deno.env.get("COLORWORKS_GOOGLE_SHEET_ID");
+
+// Define headers for each sheet type
+const BULK_ASSESSMENT_HEADERS = [
+  'Name', 'Email', 'Phone Number', 'Number of Assessments', 'Submission Date'
+];
+
+const LIVE_EVENT_HEADERS = [
+  'Name', 'Email', 'Phone Number', 'Job Title', 'Organization', 'Website',
+  'Estimated Attendees', 'Content Type', 'Duration', 'Event Formats',
+  'Event Group Type', 'Event Types', 'Custom Event Type', 'Location Type',
+  'City', 'State', 'Location Name', 'Budget', 'Event Date',
+  'Interested In Bulk Assessments', 'Referral Source', 'Referral Info', 'Submission Date'
+];
+
+const USER_SIGNUP_HEADERS = [
+  'Email', 'First Name', 'Last Name', 'Created Date', 'Signup Date'
+];
 
 console.info("Google Sheets update function started");
 
@@ -137,6 +215,109 @@ async function getServiceAccountCreds() {
   }
 }
 
+/**
+ * Format event date for spreadsheet
+ */
+function formatEventDate(eventDate: string | { startDate: string; endDate: string } | undefined): string {
+  if (!eventDate) return '';
+  return typeof eventDate === 'string'
+    ? eventDate
+    : `${eventDate.startDate} - ${eventDate.endDate}`;
+}
+
+/**
+ * Ensure sheet has headers
+ */
+async function ensureSheetHasHeaders(
+  sheet: GoogleSpreadsheetWorksheet, 
+  headers: string[]
+): Promise<void> {
+  try {
+    // Load first row to check if headers exist
+    await sheet.loadCells();
+    
+    // Check if first cell is empty
+    const firstCell = sheet.getCell(0, 0);
+    if (!firstCell.value) {
+      console.info("Sheet is missing headers. Adding them now...");
+      
+      // Add headers as first row
+      for (let i = 0; i < headers.length; i++) {
+        const cell = sheet.getCell(0, i);
+        cell.value = headers[i];
+      }
+      
+      await sheet.saveUpdatedCells();
+      console.info("Headers added successfully");
+    } else {
+      console.info("Headers already exist in sheet");
+    }
+  } catch (error) {
+    console.error("Error ensuring headers:", error);
+    throw error;
+  }
+}
+
+/**
+ * Format bulk assessment data for spreadsheet
+ */
+function formatBulkAssessmentData(data: BulkAssessmentPayload): Record<string, any> {
+  return {
+    'Name': data.name,
+    'Email': data.email,
+    'Phone Number': data.phoneNumber,
+    'Number of Assessments': data.numberOfAssessments,
+    'Submission Date': new Date().toISOString(),
+  };
+}
+
+/**
+ * Format live event data for spreadsheet
+ */
+function formatLiveEventData(data: LiveEventPayload): Record<string, any> {
+  const eventDate = formatEventDate(data.eventDate);
+  
+  return {
+    'Name': data.name,
+    'Email': data.email,
+    'Phone Number': data.phoneNumber,
+    'Job Title': data.jobTitle,
+    'Organization': data.organizationName,
+    'Website': data.websiteUrl,
+    'Estimated Attendees': data.estimatedAttendees,
+    'Content Type': data.desiredContentType || '',
+    'Duration': data.desiredDuration || '',
+    'Event Formats': Array.isArray(data.desiredFormats) ? data.desiredFormats.join(', ') : '',
+    'Event Group Type': data.specialEventInfo?.type || '',
+    'Event Types': Array.isArray(data.specialEventInfo?.eventTypes) ? 
+      data.specialEventInfo.eventTypes.join(', ') : '',
+    'Custom Event Type': data.specialEventInfo?.userDefinedEventType || '',
+    'Location Type': data.locationInfo?.type || '',
+    'City': data.locationInfo && 'city' in data.locationInfo ? data.locationInfo.city : '',
+    'State': data.locationInfo && 'state' in data.locationInfo ? data.locationInfo.state : '',
+    'Location Name': data.locationInfo && 'locationName' in data.locationInfo ? data.locationInfo.locationName : '',
+    'Budget': data.budget || '',
+    'Event Date': eventDate,
+    'Interested In Bulk Assessments': data.interestedInBulkAssessments ? 'Yes' : 'No',
+    'Referral Source': data.referralInfo.source,
+    'Referral Info': data.referralInfo.moreInfo,
+    'Submission Date': new Date().toISOString(),
+  };
+}
+
+/**
+ * Format user signup data for spreadsheet
+ */
+function formatUserSignupData(data: UserSignupPayload): Record<string, any> {
+  return {
+    'Email': data.email,
+    'First Name': data.firstName || '',
+    'Last Name': data.lastName || '',
+    'Created Date': data.createdDate,
+    'Signup Date': new Date().toISOString(),
+  };
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   // Handle CORS
   if (req.method === "OPTIONS") {
@@ -182,39 +363,73 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // Parse the request body
-    const { sheetId, tabName, values, append = false } = await req.json();
+    const { sheetId: requestSheetId, data } = await req.json();
+    
+    // Use the provided sheetId or fall back to the default
+    const sheetId = requestSheetId || DEFAULT_SHEET_ID;
 
-    // Validate required parameters
+    // Validate we have a sheet ID
     if (!sheetId) {
       return new Response(
-        JSON.stringify({ error: "Missing required parameter: sheetId" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    if (!tabName) {
-      return new Response(
-        JSON.stringify({ error: "Missing required parameter: tabName" }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    if (!values || !Array.isArray(values)) {
-      return new Response(
-        JSON.stringify({
-          error: "Missing or invalid parameter: values should be an array",
+        JSON.stringify({ 
+          error: "No sheet ID provided in request and no default sheet ID configured in environment" 
         }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         }
       );
+    }
+
+    if (!data || typeof data !== 'object') {
+      return new Response(
+        JSON.stringify({
+          error: "Missing or invalid parameter: data should be an object",
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    // Determine the data type and format
+    let tabName: string;
+    let formattedData: Record<string, any>;
+    let headers: string[] = [];
+
+    if ('dataType' in data) {
+      switch (data.dataType) {
+        case 'bulk-assessment':
+          tabName = BULK_ASSESSMENT_TAB;
+          formattedData = formatBulkAssessmentData(data as BulkAssessmentPayload);
+          headers = BULK_ASSESSMENT_HEADERS;
+          break;
+        case 'live-event':
+          tabName = LIVE_EVENT_TAB;
+          formattedData = formatLiveEventData(data as LiveEventPayload);
+          headers = LIVE_EVENT_HEADERS;
+          break;
+        case 'user-signup':
+          tabName = USER_SIGNUP_TAB;
+          formattedData = formatUserSignupData(data as UserSignupPayload);
+          headers = USER_SIGNUP_HEADERS;
+          break;
+        default:
+          return new Response(
+            JSON.stringify({ error: "Invalid data type" }),
+            {
+              status: 400,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            }
+          );
+      }
+    } else {
+      // Legacy support for the original API format
+      const { tabName: requestedTabName, values } = data;
+      tabName = requestedTabName;
+      formattedData = values;
+      // For legacy format, we don't need to set headers as the user would handle that
     }
 
     // Get service account credentials using the helper function
@@ -243,12 +458,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
     try {
       sheet = doc.sheetsByTitle[tabName];
       if (!sheet) {
-        // If sheet doesn't exist and we're in append mode, create a new sheet
-        if (append) {
-          sheet = await doc.addSheet({ title: tabName });
-        } else {
-          throw new Error(`Sheet "${tabName}" not found`);
+        // Create new sheet if it doesn't exist
+        console.info(`Creating new sheet: ${tabName}`);
+        sheet = await doc.addSheet({ title: tabName });
+        
+        // For new sheets, add headers immediately
+        if (headers.length > 0) {
+          await ensureSheetHasHeaders(sheet, headers);
         }
+      } else if (headers.length > 0) {
+        // For existing sheets, ensure headers exist
+        await ensureSheetHasHeaders(sheet, headers);
       }
     } catch (error) {
       const typedError = error as Error;
@@ -262,22 +482,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    // Update or append values
+    // Add the formatted data as a row
     try {
-      if (append) {
-        // Append rows to the sheet
-        await sheet.addRows(values);
+      if (Array.isArray(formattedData)) {
+        // Handle legacy format (array of arrays)
+        await sheet.addRows(formattedData);
       } else {
-        // Update cells in the sheet
-        await sheet.loadCells();
-
-        // Assuming values is an array of arrays (matrix) with [row, col, value] format
-        for (const [row, col, value] of values) {
-          const cell = sheet.getCell(row, col);
-          cell.value = value;
-        }
-
-        await sheet.saveUpdatedCells();
+        // Handle new format (single record)
+        await sheet.addRows([formattedData]);
       }
     } catch (error) {
       // Notify admin about error via Slack
@@ -298,9 +510,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     return new Response(
       JSON.stringify({
         success: true,
-        message: append
-          ? "Data appended successfully"
-          : "Sheet updated successfully",
+        message: "Data added to Google Sheet successfully",
       }),
       {
         status: 200,

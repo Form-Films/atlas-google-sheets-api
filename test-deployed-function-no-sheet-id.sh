@@ -12,23 +12,19 @@ if [ -z "$SUPABASE_ANON_KEY" ]; then
   exit 1
 fi
 
-# Set the Google Sheet ID
-SHEET_ID="1AqLYr4BI6UXWjGELSzs2NLagGsGwCiViwcXH5hBBack"
-
 #=================================================
-# Test Bulk Assessment Data
+# Test Bulk Assessment Data without Sheet ID
 #=================================================
-echo -e "\n\nTesting Bulk Assessment data..."
+echo -e "\n\nTesting Bulk Assessment data without Sheet ID..."
 
 curl -X POST "https://oouphgurrsruwvayrzte.supabase.co/functions/v1/update-colorworks-google-sheet" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
   -H "Origin: https://colorworks-atlas.vercel.app" \
   -d "{
-    \"sheetId\": \"$SHEET_ID\",
     \"data\": {
       \"dataType\": \"bulk-assessment\",
-      \"name\": \"John Doe (Test)\",
+      \"name\": \"John Doe (Test No SheetID)\",
       \"email\": \"test-john@example.com\",
       \"phoneNumber\": \"123-456-7890\",
       \"numberOfAssessments\": 25
@@ -36,19 +32,18 @@ curl -X POST "https://oouphgurrsruwvayrzte.supabase.co/functions/v1/update-color
   }"
 
 #=================================================
-# Test Live Event Data
+# Test Live Event Data without Sheet ID
 #=================================================
-echo -e "\n\nTesting Live Event data..."
+echo -e "\n\nTesting Live Event data without Sheet ID..."
 
 curl -X POST "https://oouphgurrsruwvayrzte.supabase.co/functions/v1/update-colorworks-google-sheet" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
   -H "Origin: https://colorworks-atlas.vercel.app" \
   -d "{
-    \"sheetId\": \"$SHEET_ID\",
     \"data\": {
       \"dataType\": \"live-event\",
-      \"name\": \"Jane Smith (Test)\",
+      \"name\": \"Jane Smith (Test No SheetID)\",
       \"email\": \"test-jane@example.com\",
       \"phoneNumber\": \"987-654-3210\",
       \"jobTitle\": \"HR Director\",
@@ -80,19 +75,18 @@ curl -X POST "https://oouphgurrsruwvayrzte.supabase.co/functions/v1/update-color
   }"
 
 #=================================================
-# Test User Signup Data
+# Test User Signup Data without Sheet ID
 #=================================================
-echo -e "\n\nTesting User Signup data..."
+echo -e "\n\nTesting User Signup data without Sheet ID..."
 
 curl -X POST "https://oouphgurrsruwvayrzte.supabase.co/functions/v1/update-colorworks-google-sheet" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
   -H "Origin: https://colorworks-atlas.vercel.app" \
   -d "{
-    \"sheetId\": \"$SHEET_ID\",
     \"data\": {
       \"dataType\": \"user-signup\",
-      \"email\": \"test-user@example.com\",
+      \"email\": \"test-user-no-sheetid@example.com\",
       \"firstName\": \"Test\",
       \"lastName\": \"User\",
       \"createdDate\": \"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\"
@@ -100,4 +94,4 @@ curl -X POST "https://oouphgurrsruwvayrzte.supabase.co/functions/v1/update-color
   }"
 
 echo -e "\n\nTests completed. Check the Google Sheet for results."
-echo "Sheet URL: https://docs.google.com/spreadsheets/d/$SHEET_ID/" 
+echo "Sheet URL: https://docs.google.com/spreadsheets/d/1AqLYr4BI6UXWjGELSzs2NLagGsGwCiViwcXH5hBBack/" 
