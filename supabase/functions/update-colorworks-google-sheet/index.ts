@@ -329,7 +329,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         "Name": bulkData.name,
         "Email": bulkData.email,
         "Phone Number": bulkData.phoneNumber, // Try with space
-        "Requested Assessments": bulkData.numberOfAssessments,
+        "Number of Assessments": bulkData.numberOfAssessments, // Changed back to exact header
         "Submission Date": timestamp // Full ISO timestamp
       }];
       
