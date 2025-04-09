@@ -144,6 +144,28 @@ async function getServiceAccountCreds(): Promise<ServiceAccountCredentials> {
   }
 }
 
+// Define types for different data types
+type BulkAssessmentData = {
+  dataType: 'bulk-assessment';
+  name: string;
+  email: string;
+  phoneNumber: string;
+  numberOfAssessments: number;
+};
+
+type LiveEventData = {
+  dataType: 'live-event';
+  [key: string]: unknown;
+};
+
+interface RequestData {
+  data: {
+    dataType: string;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
 Deno.serve(async (req: Request): Promise<Response> => {
   // Handle CORS
   if (req.method === "OPTIONS") {
@@ -210,13 +232,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // Parse the request body
-    let requestBody: {
-      sheetId?: string;
-      tabName?: string;
-      values?: unknown[];
-      append?: boolean;
-      [key: string]: unknown;
-    };
+    let requestBody: RequestData;
     try {
       requestBody = await req.json();
       console.info("Parsed request body:", JSON.stringify(requestBody, null, 2));
@@ -234,14 +250,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    const { sheetId, tabName, values, append = false } = requestBody;
-
-    // Validate required parameters with detailed logging
-    if (!sheetId) {
-      console.error("Missing required parameter: sheetId");
+    // Check if we have a data property
+    if (!requestBody.data) {
+      console.error("Missing required property: data");
       return new Response(
         JSON.stringify({ 
-          error: "Missing required parameter: sheetId",
+          error: "Missing required property: data",
           receivedParams: Object.keys(requestBody)
         }),
         {
@@ -251,48 +265,91 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    if (!tabName) {
-      console.error("Missing required parameter: tabName");
+    // Process based on data type
+    // Get Google Sheet configuration from environment variables
+    const colorworksSheetId = Deno.env.get("COLORWORKS_GOOGLE_SHEET_ID");
+    if (!colorworksSheetId) {
+      console.error("COLORWORKS_GOOGLE_SHEET_ID environment variable not set");
       return new Response(
         JSON.stringify({ 
-          error: "Missing required parameter: tabName",
-          receivedParams: Object.keys(requestBody)
+          error: "Server configuration error: Missing sheet ID"
         }),
         {
-          status: 400,
+          status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+    
+    const sheetId: string = colorworksSheetId;
+    let tabName: string;
+    let values: SheetRowData[];
+    const append = true; // Always append for these data types
+
+    // Process data based on dataType
+    const data = requestBody.data;
+    console.info(`Processing data with type: ${data.dataType}`);
+    
+    if (data.dataType === 'bulk-assessment') {
+      const bulkData = data as BulkAssessmentData;
+      
+      // Validate required fields
+      const requiredFields = ['name', 'email', 'phoneNumber', 'numberOfAssessments'];
+      const missingFields = requiredFields.filter(field => !(field in bulkData));
+      
+      if (missingFields.length > 0) {
+        console.error(`Missing required fields for bulk-assessment: ${missingFields.join(', ')}`);
+        return new Response(
+          JSON.stringify({ 
+            error: `Missing required fields: ${missingFields.join(', ')}` 
+          }),
+          { 
+            status: 400, 
+            headers: { ...corsHeaders, "Content-Type": "application/json" } 
+          }
+        );
+      }
+
+      // Set the tab name for bulk assessments
+      tabName = "Bulk Assessments";
+      
+      // Format the data for the sheet
+      const timestamp = new Date().toISOString();
+      values = [{
+        Timestamp: timestamp,
+        Name: bulkData.name,
+        Email: bulkData.email,
+        Phone: bulkData.phoneNumber,
+        "Number of Assessments": bulkData.numberOfAssessments,
+      }];
+      
+    } else if (data.dataType === 'live-event') {
+      // Handle live event data
+      tabName = "Live Events";
+      // Process live event data similarly to bulk assessment
+      // This is a placeholder - implement according to your requirements
+      values = [{
+        Timestamp: new Date().toISOString(),
+        // Add other fields as needed
+      }];
+    } else {
+      console.error(`Unknown data type: ${data.dataType}`);
+      return new Response(
+        JSON.stringify({ 
+          error: `Unknown data type: ${data.dataType}` 
+        }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
         }
       );
     }
 
-    if (!values) {
-      console.error("Missing required parameter: values");
-      return new Response(
-        JSON.stringify({ 
-          error: "Missing required parameter: values",
-          receivedParams: Object.keys(requestBody)
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    if (!Array.isArray(values)) {
-      console.error("Invalid parameter: values should be an array, got:", typeof values);
-      return new Response(
-        JSON.stringify({
-          error: "Invalid parameter: values should be an array",
-          valueType: typeof values,
-          valuePreview: JSON.stringify(values).substring(0, 100) + (JSON.stringify(values).length > 100 ? '...' : '')
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
+    console.info("Processed data:", {
+      sheetId,
+      tabName,
+      values: JSON.stringify(values)
+    });
 
     // Get service account credentials using the helper function
     console.info("Attempting to get service account credentials...");
@@ -395,7 +452,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         console.info(`Appending ${values.length} rows to sheet...`);
         console.info("Sample data (first row):", JSON.stringify(values[0]));
         // Cast values to the expected type
-        await sheet.addRows(values as SheetRowData[]);
+        await sheet.addRows(values);
         console.info("Rows appended successfully");
       } else {
         // Update cells in the sheet
@@ -413,7 +470,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
           if (!Array.isArray(item) || item.length !== 3) {
             throw new Error("Each value must be an array with [row, col, value] format");
           }
-          const [row, col, value] = item as [number, number, unknown];
+          const row = item[0] as number;
+          const col = item[1] as number;
+          const value = item[2];
           console.info(`Setting cell [${row}, ${col}] to value: ${value}`);
           const cell = sheet.getCell(row, col);
           cell.value = value;
