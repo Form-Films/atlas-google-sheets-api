@@ -151,6 +151,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   try {
+    // Add detailed request logging
+    console.info("Request received:", {
+      method: req.method,
+      url: req.url,
+      headers: Object.fromEntries([...req.headers.entries()])
+    });
+
     // Get client IP for rate limiting
     const clientIp = req.headers.get("x-forwarded-for") || "unknown";
 
@@ -173,6 +180,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     ipRequestMap.set(clientIp, ipData);
 
     if (ipData.count > RATE_LIMIT_NUM) {
+      console.warn(`Rate limit exceeded for IP: ${clientIp}`);
       return new Response(
         JSON.stringify({ error: "Too many requests, please try again later" }),
         {
@@ -185,16 +193,57 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // Validate request format and authorization
     const validation = await validateRequest(req);
     if (!validation.success) {
+      console.error("Request validation failed");
       return validation.response as Response;
     }
 
-    // Parse the request body
-    const { sheetId, tabName, values, append = false } = await req.json();
+    // Clone the request to read the body multiple times
+    const clonedReq = req.clone();
+    
+    // Log the raw request body for debugging
+    try {
+      const rawBody = await clonedReq.text();
+      console.info("Raw request body:", rawBody);
+    } catch (e: unknown) {
+      const error = e as Error;
+      console.warn("Failed to log raw body:", error.message);
+    }
 
-    // Validate required parameters
-    if (!sheetId) {
+    // Parse the request body
+    let requestBody: {
+      sheetId?: string;
+      tabName?: string;
+      values?: unknown[];
+      append?: boolean;
+      [key: string]: unknown;
+    };
+    try {
+      requestBody = await req.json();
+      console.info("Parsed request body:", JSON.stringify(requestBody, null, 2));
+    } catch (parseError) {
+      console.error("Failed to parse request body as JSON:", (parseError as Error).message);
       return new Response(
-        JSON.stringify({ error: "Missing required parameter: sheetId" }),
+        JSON.stringify({ 
+          error: "Invalid JSON in request body",
+          details: (parseError as Error).message
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    const { sheetId, tabName, values, append = false } = requestBody;
+
+    // Validate required parameters with detailed logging
+    if (!sheetId) {
+      console.error("Missing required parameter: sheetId");
+      return new Response(
+        JSON.stringify({ 
+          error: "Missing required parameter: sheetId",
+          receivedParams: Object.keys(requestBody)
+        }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -203,8 +252,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     if (!tabName) {
+      console.error("Missing required parameter: tabName");
       return new Response(
-        JSON.stringify({ error: "Missing required parameter: tabName" }),
+        JSON.stringify({ 
+          error: "Missing required parameter: tabName",
+          receivedParams: Object.keys(requestBody)
+        }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -212,10 +265,27 @@ Deno.serve(async (req: Request): Promise<Response> => {
       );
     }
 
-    if (!values || !Array.isArray(values)) {
+    if (!values) {
+      console.error("Missing required parameter: values");
+      return new Response(
+        JSON.stringify({ 
+          error: "Missing required parameter: values",
+          receivedParams: Object.keys(requestBody)
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
+    if (!Array.isArray(values)) {
+      console.error("Invalid parameter: values should be an array, got:", typeof values);
       return new Response(
         JSON.stringify({
-          error: "Missing or invalid parameter: values should be an array",
+          error: "Invalid parameter: values should be an array",
+          valueType: typeof values,
+          valuePreview: JSON.stringify(values).substring(0, 100) + (JSON.stringify(values).length > 100 ? '...' : '')
         }),
         {
           status: 400,
@@ -225,43 +295,92 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // Get service account credentials using the helper function
+    console.info("Attempting to get service account credentials...");
     const serviceAccountCreds = await getServiceAccountCreds();
     console.info("Successfully retrieved service account credentials");
     console.info("Service account client_email:", serviceAccountCreds.client_email);
     console.info("Service account private_key length:", serviceAccountCreds.private_key.length);
 
     // Initialize the Google Sheets document
-    console.info("Initializing Google Spreadsheet...");
+    console.info(`Initializing Google Spreadsheet with ID: ${sheetId}...`);
     const doc = new GoogleSpreadsheet(sheetId) as GoogleSpreadsheetType;
     
     // Initialize auth with the service account
     console.info("Authenticating with service account...");
-    await doc.useServiceAccountAuth({
-      client_email: serviceAccountCreds.client_email,
-      private_key: serviceAccountCreds.private_key,
-    });
+    try {
+      await doc.useServiceAccountAuth({
+        client_email: serviceAccountCreds.client_email,
+        private_key: serviceAccountCreds.private_key,
+      });
+      console.info("Authentication successful");
+    } catch (authError) {
+      console.error("Authentication failed:", (authError as Error).message);
+      const slackMessage = `Google Sheets authentication error: ${(authError as Error).message}`;
+      await useEdgeRuntimeWaitUntil(notifySlack(slackMessage));
+      
+      return new Response(
+        JSON.stringify({ 
+          error: "Authentication with Google Sheets failed",
+          details: (authError as Error).message
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
     
     console.info("Loading spreadsheet info...");
-    await doc.loadInfo();
-    console.info("Spreadsheet loaded successfully:", doc.title);
+    try {
+      await doc.loadInfo();
+      console.info("Spreadsheet loaded successfully:", doc.title);
+    } catch (loadError) {
+      console.error("Failed to load spreadsheet info:", (loadError as Error).message);
+      const slackMessage = `Failed to load Google Sheet: ${(loadError as Error).message}`;
+      await useEdgeRuntimeWaitUntil(notifySlack(slackMessage));
+      
+      return new Response(
+        JSON.stringify({ 
+          error: "Failed to load spreadsheet",
+          details: (loadError as Error).message
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
 
     // Access the specified worksheet (tab)
     let sheet: GoogleSpreadsheetWorksheet;
     try {
+      console.info(`Looking for tab: "${tabName}" in spreadsheet`);
       sheet = doc.sheetsByTitle[tabName];
       if (!sheet) {
+        console.info(`Tab "${tabName}" not found`);
+        
         // If sheet doesn't exist and we're in append mode, create a new sheet
         if (append) {
+          console.info(`Creating new tab "${tabName}" in append mode`);
           sheet = await doc.addSheet({ title: tabName });
+          console.info(`New tab "${tabName}" created successfully`);
         } else {
+          console.error(`Tab "${tabName}" not found and not in append mode`);
           throw new Error(`Sheet "${tabName}" not found`);
         }
+      } else {
+        console.info(`Tab "${tabName}" found successfully`);
       }
     } catch (error) {
       const typedError = error as Error;
       const errorMessage = typedError.message;
+      console.error(`Error accessing sheet: ${errorMessage}`);
+      
       return new Response(
-        JSON.stringify({ error: `Error accessing sheet: ${errorMessage}` }),
+        JSON.stringify({ 
+          error: `Error accessing sheet: ${errorMessage}`,
+          availableTabs: Object.keys(doc.sheetsByTitle || {})
+        }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -273,35 +392,60 @@ Deno.serve(async (req: Request): Promise<Response> => {
     try {
       if (append) {
         // Append rows to the sheet
-        await sheet.addRows(values);
+        console.info(`Appending ${values.length} rows to sheet...`);
+        console.info("Sample data (first row):", JSON.stringify(values[0]));
+        // Cast values to the expected type
+        await sheet.addRows(values as SheetRowData[]);
+        console.info("Rows appended successfully");
       } else {
         // Update cells in the sheet
+        console.info(`Updating ${values.length} cells in sheet...`);
+        console.info("Sample data (first update):", JSON.stringify(values[0]));
         await sheet.loadCells();
 
         // Assuming values is an array of arrays (matrix) with [row, col, value] format
-        for (const [row, col, value] of values) {
+        // Check if values is iterable before proceeding
+        if (!Array.isArray(values)) {
+          throw new Error("Values must be an array for cell updates");
+        }
+        
+        for (const item of values) {
+          if (!Array.isArray(item) || item.length !== 3) {
+            throw new Error("Each value must be an array with [row, col, value] format");
+          }
+          const [row, col, value] = item as [number, number, unknown];
+          console.info(`Setting cell [${row}, ${col}] to value: ${value}`);
           const cell = sheet.getCell(row, col);
           cell.value = value;
         }
 
         await sheet.saveUpdatedCells();
+        console.info("Cells updated successfully");
       }
     } catch (error) {
       // Notify admin about error via Slack
       const typedError = error as Error;
       const errorMessage = typedError.message;
+      console.error(`Error updating sheet: ${errorMessage}`, typedError.stack);
       const slackMessage = `Error updating Google Sheet: ${errorMessage}`;
 
       // Use our helper function for EdgeRuntime waitUntil
       await useEdgeRuntimeWaitUntil(notifySlack(slackMessage));
 
-      return new Response(JSON.stringify({ error: slackMessage }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({ 
+          error: `Error updating sheet: ${errorMessage}`,
+          details: typedError.stack
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
     // Return success response
+    console.info("Operation completed successfully");
     return new Response(
       JSON.stringify({
         success: true,
@@ -318,14 +462,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // Notify admin about error via Slack
     const typedError = error as Error;
     const errorMessage = typedError.message;
+    console.error("Unexpected error:", errorMessage, typedError.stack);
     const slackMessage = `Unexpected error in update-colorworks-google-sheet function: ${errorMessage}`;
 
     // Use our helper function for EdgeRuntime waitUntil
     await useEdgeRuntimeWaitUntil(notifySlack(slackMessage));
 
-    return new Response(JSON.stringify({ error: slackMessage }), {
-      status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ 
+        error: `Unexpected error: ${errorMessage}`, 
+        details: typedError.stack
+      }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      }
+    );
   }
 });
