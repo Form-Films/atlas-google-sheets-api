@@ -315,13 +315,26 @@ Deno.serve(async (req: Request): Promise<Response> => {
       
       // Format the data for the sheet
       const timestamp = new Date().toISOString();
+      // Log the raw data for debugging
+      console.info("Raw data being processed:", {
+        name: bulkData.name,
+        email: bulkData.email,
+        phone: bulkData.phoneNumber,
+        assessments: bulkData.numberOfAssessments
+      });
+      
+      // Create row with exact header names that match the Google Sheet
       values = [{
-        Timestamp: timestamp,
-        Name: bulkData.name,
-        Email: bulkData.email,
-        Phone: bulkData.phoneNumber,
-        "Number of Assessments": bulkData.numberOfAssessments,
+        "Date": timestamp.split('T')[0], // Just the date part YYYY-MM-DD
+        "Name": bulkData.name,
+        "Email": bulkData.email,
+        "Phone Number": bulkData.phoneNumber, // Try with space
+        "Requested Assessments": bulkData.numberOfAssessments,
+        "Submission Date": timestamp // Full ISO timestamp
       }];
+      
+      // Log the formatted row for debugging
+      console.info("Formatted row for sheet:", values[0]);
       
     } else if (data.dataType === 'live-event') {
       // Handle live event data
