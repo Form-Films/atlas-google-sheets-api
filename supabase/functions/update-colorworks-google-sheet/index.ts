@@ -4,10 +4,14 @@ import { notifySlack } from "../_shared/notify-slack.ts";
 
 // Define local types to work around TypeScript import issues
 // These are simplified versions of the actual types, containing just what we need
+
+// Define a type for row data
+type SheetRowData = Record<string, string | number | boolean | null>;
+
 type GoogleSpreadsheetWorksheet = {
-  addRows: (rows: any[]) => Promise<any>;
+  addRows: (rows: SheetRowData[]) => Promise<SheetRowData[]>;
   loadCells: () => Promise<void>;
-  getCell: (row: number, col: number) => { value: any };
+  getCell: (row: number, col: number) => { value: unknown };
   saveUpdatedCells: () => Promise<void>;
 };
 
@@ -34,7 +38,7 @@ const ipRequestMap = new Map<string, { count: number; resetTime: number }>();
 console.info("Google Sheets update function started");
 
 // Helper function to check if EdgeRuntime exists and use waitUntil
-async function useEdgeRuntimeWaitUntil(promise: Promise<any>): Promise<void> {
+async function useEdgeRuntimeWaitUntil(promise: Promise<unknown>): Promise<void> {
   // Check if EdgeRuntime exists with typeof to avoid reference errors
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime && 'waitUntil' in EdgeRuntime) {
     // @ts-ignore - We've checked that it exists and has waitUntil
@@ -45,18 +49,22 @@ async function useEdgeRuntimeWaitUntil(promise: Promise<any>): Promise<void> {
   }
 }
 
+// Define a type for service account credentials
+type ServiceAccountCredentials = {
+  client_email: string;
+  private_key: string;
+  [key: string]: unknown;
+};
+
 /**
  * Helper function to get service account credentials from various sources
  * Prioritizes:
  * 1. Local file (for development)
  * 2. Environment variable (for production)
  */
-async function getServiceAccountCreds() {
-  let serviceAccountCreds: any = null;
-  
+async function getServiceAccountCreds(): Promise<ServiceAccountCredentials> {
   try {
     // Skip local file reading in production mode to avoid errors
-    // In development, manual handling would be needed
     
     // Try to get from base64 encoded environment variable (new method)
     try {
@@ -70,12 +78,12 @@ async function getServiceAccountCreds() {
           Uint8Array.from(atob(base64Key), c => c.charCodeAt(0))
         );
         
-        serviceAccountCreds = JSON.parse(jsonStr);
+        const credentials = JSON.parse(jsonStr) as ServiceAccountCredentials;
         
         // Verify we have the required fields
-        if (serviceAccountCreds.client_email && serviceAccountCreds.private_key) {
+        if (credentials.client_email && credentials.private_key) {
           console.info("Service account key decoded from base64 successfully");
-          return serviceAccountCreds;
+          return credentials;
         }
       }
     } catch (error) {
@@ -88,21 +96,21 @@ async function getServiceAccountCreds() {
     const rawServiceAccountKey = Deno.env.get("GOOGLE_SERVICE_ACCOUNT_KEY") || "{}";
     
     // Try direct parsing
-    serviceAccountCreds = JSON.parse(rawServiceAccountKey);
+    let credentials = JSON.parse(rawServiceAccountKey) as ServiceAccountCredentials;
     
     // If result is a string, we have double encoding
-    if (typeof serviceAccountCreds === 'string') {
+    if (typeof credentials === 'string') {
       console.info("Service account key is double-encoded. Parsing again...");
-      serviceAccountCreds = JSON.parse(serviceAccountCreds);
+      credentials = JSON.parse(credentials) as ServiceAccountCredentials;
     }
     
     // Verify we have the required fields
-    if (!serviceAccountCreds.client_email || !serviceAccountCreds.private_key) {
+    if (!credentials.client_email || !credentials.private_key) {
       throw new Error("Missing required fields in service account credentials");
     }
     
     console.info("Service account key loaded from environment variable successfully");
-    return serviceAccountCreds;
+    return credentials;
   } catch (error) {
     const typedError = error as Error;
     console.error("Error getting service account credentials:", typedError);
@@ -119,16 +127,15 @@ async function getServiceAccountCreds() {
         // Handle potential double escaping
         privateKey = privateKey.replace(/\\\\n/g, "\\n");
         
-        serviceAccountCreds = {
+        const credentials: ServiceAccountCredentials = {
           client_email: emailMatch[1],
           private_key: privateKey
         };
         
         console.info("Service account fields extracted successfully with regex");
-        return serviceAccountCreds;
-      } else {
-        throw new Error("Could not extract client_email and private_key");
+        return credentials;
       }
+      throw new Error("Could not extract client_email and private_key");
     } catch (regexError) {
       const typedRegexError = regexError as Error;
       console.error("Regex extraction failed:", typedRegexError);
