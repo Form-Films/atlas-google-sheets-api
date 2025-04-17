@@ -16,7 +16,9 @@ type GoogleSpreadsheetWorksheet = {
 };
 
 type GoogleSpreadsheetType = {
-  useServiceAccountAuth: (credentials: { client_email: string; private_key: string }) => Promise<void>;
+  useServiceAccountAuth: (
+    credentials: { client_email: string; private_key: string },
+  ) => Promise<void>;
   loadInfo: () => Promise<void>;
   sheetsByTitle: Record<string, GoogleSpreadsheetWorksheet>;
   addSheet: (options: { title: string }) => Promise<GoogleSpreadsheetWorksheet>;
@@ -38,9 +40,14 @@ const ipRequestMap = new Map<string, { count: number; resetTime: number }>();
 console.info("Google Sheets update function started");
 
 // Helper function to check if EdgeRuntime exists and use waitUntil
-async function useEdgeRuntimeWaitUntil(promise: Promise<unknown>): Promise<void> {
+async function useEdgeRuntimeWaitUntil(
+  promise: Promise<unknown>,
+): Promise<void> {
   // Check if EdgeRuntime exists with typeof to avoid reference errors
-  if (typeof EdgeRuntime !== "undefined" && EdgeRuntime && 'waitUntil' in EdgeRuntime) {
+  if (
+    typeof EdgeRuntime !== "undefined" && EdgeRuntime &&
+    "waitUntil" in EdgeRuntime
+  ) {
     // @ts-ignore - We've checked that it exists and has waitUntil
     EdgeRuntime.waitUntil(promise);
   } else {
@@ -65,21 +72,21 @@ type ServiceAccountCredentials = {
 async function getServiceAccountCreds(): Promise<ServiceAccountCredentials> {
   try {
     // Skip local file reading in production mode to avoid errors
-    
+
     // Try to get from base64 encoded environment variable (new method)
     try {
       console.info("Attempting to read base64 encoded service account key...");
       const base64Key = Deno.env.get("GOOGLE_SERVICE_ACCOUNT_KEY_BASE64");
-      
+
       if (base64Key) {
         // Decode from base64
         const decoder = new TextDecoder();
         const jsonStr = decoder.decode(
-          Uint8Array.from(atob(base64Key), c => c.charCodeAt(0))
+          Uint8Array.from(atob(base64Key), (c) => c.charCodeAt(0)),
         );
-        
+
         const credentials = JSON.parse(jsonStr) as ServiceAccountCredentials;
-        
+
         // Verify we have the required fields
         if (credentials.client_email && credentials.private_key) {
           console.info("Service account key decoded from base64 successfully");
@@ -90,63 +97,76 @@ async function getServiceAccountCreds(): Promise<ServiceAccountCredentials> {
       const base64Error = error as Error;
       console.warn("Could not decode base64 key:", base64Error.message);
     }
-    
+
     // Otherwise, get from environment variable (for production)
-    console.info("Attempting to read service account key from environment variable...");
-    const rawServiceAccountKey = Deno.env.get("GOOGLE_SERVICE_ACCOUNT_KEY") || "{}";
-    
+    console.info(
+      "Attempting to read service account key from environment variable...",
+    );
+    const rawServiceAccountKey = Deno.env.get("GOOGLE_SERVICE_ACCOUNT_KEY") ||
+      "{}";
+
     // Try direct parsing
-    let credentials = JSON.parse(rawServiceAccountKey) as ServiceAccountCredentials;
-    
+    let credentials = JSON.parse(
+      rawServiceAccountKey,
+    ) as ServiceAccountCredentials;
+
     // If result is a string, we have double encoding
-    if (typeof credentials === 'string') {
+    if (typeof credentials === "string") {
       console.info("Service account key is double-encoded. Parsing again...");
       credentials = JSON.parse(credentials) as ServiceAccountCredentials;
     }
-    
+
     // Verify we have the required fields
     if (!credentials.client_email || !credentials.private_key) {
       throw new Error("Missing required fields in service account credentials");
     }
-    
-    console.info("Service account key loaded from environment variable successfully");
+
+    console.info(
+      "Service account key loaded from environment variable successfully",
+    );
     return credentials;
   } catch (error) {
     const typedError = error as Error;
     console.error("Error getting service account credentials:", typedError);
-    
+
     // Last resort: Try to use regex to extract required fields
     try {
-      console.info("Attempting to extract service account fields with regex...");
+      console.info(
+        "Attempting to extract service account fields with regex...",
+      );
       const rawText = Deno.env.get("GOOGLE_SERVICE_ACCOUNT_KEY") || "{}";
       const emailMatch = rawText.match(/"client_email"\s*:\s*"([^"]+)"/);
       const keyMatch = rawText.match(/"private_key"\s*:\s*"([^"]+)"/);
-      
+
       if (emailMatch && keyMatch) {
         let privateKey = keyMatch[1].replace(/\\n/g, "\n");
         // Handle potential double escaping
         privateKey = privateKey.replace(/\\\\n/g, "\\n");
-        
+
         const credentials: ServiceAccountCredentials = {
           client_email: emailMatch[1],
-          private_key: privateKey
+          private_key: privateKey,
         };
-        
-        console.info("Service account fields extracted successfully with regex");
+
+        console.info(
+          "Service account fields extracted successfully with regex",
+        );
         return credentials;
       }
       throw new Error("Could not extract client_email and private_key");
     } catch (regexError) {
       const typedRegexError = regexError as Error;
       console.error("Regex extraction failed:", typedRegexError);
-      throw new Error(`Cannot parse service account credentials: ${typedError.message}`);
+      throw new Error(
+        `Cannot parse service account credentials: ${typedError.message}`,
+      );
     }
   }
 }
 
 // Define types for different data types
 type BulkAssessmentData = {
-  dataType: 'bulk-assessment';
+  dataType: "bulk-assessment";
   name: string;
   email: string;
   phoneNumber: string;
@@ -155,7 +175,7 @@ type BulkAssessmentData = {
 
 // Match the frontend payload structure
 type LiveEventData = {
-  dataType: 'live-event';
+  dataType: "live-event";
   name: string;
   email: string;
   phoneNumber: string;
@@ -187,6 +207,15 @@ type LiveEventData = {
   [key: string]: unknown;
 };
 
+// User signup data type
+type UserSignupData = {
+  dataType: "user-signup";
+  email: string;
+  firstName: string;
+  lastName: string;
+  createdDate: string;
+};
+
 interface RequestData {
   data: {
     dataType: string;
@@ -206,7 +235,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     console.info("Request received:", {
       method: req.method,
       url: req.url,
-      headers: Object.fromEntries([...req.headers.entries()])
+      headers: Object.fromEntries([...req.headers.entries()]),
     });
 
     // Get client IP for rate limiting
@@ -237,7 +266,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         {
           status: 429,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
       );
     }
 
@@ -250,7 +279,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     // Clone the request to read the body multiple times
     const clonedReq = req.clone();
-    
+
     // Log the raw request body for debugging
     try {
       const rawBody = await clonedReq.text();
@@ -264,18 +293,24 @@ Deno.serve(async (req: Request): Promise<Response> => {
     let requestBody: RequestData;
     try {
       requestBody = await req.json();
-      console.info("Parsed request body:", JSON.stringify(requestBody, null, 2));
+      console.info(
+        "Parsed request body:",
+        JSON.stringify(requestBody, null, 2),
+      );
     } catch (parseError) {
-      console.error("Failed to parse request body as JSON:", (parseError as Error).message);
+      console.error(
+        "Failed to parse request body as JSON:",
+        (parseError as Error).message,
+      );
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           error: "Invalid JSON in request body",
-          details: (parseError as Error).message
+          details: (parseError as Error).message,
         }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
       );
     }
 
@@ -283,14 +318,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!requestBody.data) {
       console.error("Missing required property: data");
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           error: "Missing required property: data",
-          receivedParams: Object.keys(requestBody)
+          receivedParams: Object.keys(requestBody),
         }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
       );
     }
 
@@ -300,16 +335,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
     if (!colorworksSheetId) {
       console.error("COLORWORKS_GOOGLE_SHEET_ID environment variable not set");
       return new Response(
-        JSON.stringify({ 
-          error: "Server configuration error: Missing sheet ID"
+        JSON.stringify({
+          error: "Server configuration error: Missing sheet ID",
         }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
       );
     }
-    
+
     const sheetId: string = colorworksSheetId;
     let tabName: string;
     let values: SheetRowData[];
@@ -318,30 +353,41 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // Process data based on dataType
     const data = requestBody.data;
     console.info(`Processing data with type: ${data.dataType}`);
-    
-    if (data.dataType === 'bulk-assessment') {
+
+    if (data.dataType === "bulk-assessment") {
       const bulkData = data as BulkAssessmentData;
-      
+
       // Validate required fields
-      const requiredFields = ['name', 'email', 'phoneNumber', 'numberOfAssessments'];
-      const missingFields = requiredFields.filter(field => !(field in bulkData));
-      
+      const requiredFields = [
+        "name",
+        "email",
+        "phoneNumber",
+        "numberOfAssessments",
+      ];
+      const missingFields = requiredFields.filter((field) =>
+        !(field in bulkData)
+      );
+
       if (missingFields.length > 0) {
-        console.error(`Missing required fields for bulk-assessment: ${missingFields.join(', ')}`);
+        console.error(
+          `Missing required fields for bulk-assessment: ${
+            missingFields.join(", ")
+          }`,
+        );
         return new Response(
-          JSON.stringify({ 
-            error: `Missing required fields: ${missingFields.join(', ')}` 
+          JSON.stringify({
+            error: `Missing required fields: ${missingFields.join(", ")}`,
           }),
-          { 
-            status: 400, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          }
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
         );
       }
 
       // Set the tab name for bulk assessments
       tabName = "Bulk Assessments";
-      
+
       // Format the data for the sheet
       const timestamp = new Date().toISOString();
       // Log the raw data for debugging
@@ -349,78 +395,91 @@ Deno.serve(async (req: Request): Promise<Response> => {
         name: bulkData.name,
         email: bulkData.email,
         phone: bulkData.phoneNumber,
-        assessments: bulkData.numberOfAssessments
+        assessments: bulkData.numberOfAssessments,
       });
-      
+
       // Create row with exact header names that match the Google Sheet
       values = [{
-        "Date": timestamp.split('T')[0], // Just the date part YYYY-MM-DD
+        "Date": timestamp.split("T")[0], // Just the date part YYYY-MM-DD
         "Name": bulkData.name,
         "Email": bulkData.email,
         "Phone Number": bulkData.phoneNumber, // Try with space
         "Number of Assessments": bulkData.numberOfAssessments, // Changed back to exact header
-        "Submission Date": timestamp // Full ISO timestamp
+        "Submission Date": timestamp, // Full ISO timestamp
       }];
-      
+
       // Log the formatted row for debugging
       console.info("Formatted row for sheet:", values[0]);
-      
-    } else if (data.dataType === 'live-event') {
+    } else if (data.dataType === "live-event") {
       const eventData = data as LiveEventData;
-      
+
       // Validate required fields for live events
-      const requiredFields = ['name', 'email', 'phoneNumber', 'estimatedAttendees'];
-      const missingFields = requiredFields.filter(field => !(field in eventData));
-      
+      const requiredFields = [
+        "name",
+        "email",
+        "phoneNumber",
+        "estimatedAttendees",
+      ];
+      const missingFields = requiredFields.filter((field) =>
+        !(field in eventData)
+      );
+
       if (missingFields.length > 0) {
-        console.error(`Missing required fields for live-event: ${missingFields.join(', ')}`);
+        console.error(
+          `Missing required fields for live-event: ${missingFields.join(", ")}`,
+        );
         return new Response(
-          JSON.stringify({ 
-            error: `Missing required fields: ${missingFields.join(', ')}` 
+          JSON.stringify({
+            error: `Missing required fields: ${missingFields.join(", ")}`,
           }),
-          { 
-            status: 400, 
-            headers: { ...corsHeaders, "Content-Type": "application/json" } 
-          }
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
         );
       }
-      
+
       // Handle live event data
       tabName = "Live Events";
-      
+
       // Log the raw data for debugging
-      console.info("Raw live event data being processed:", JSON.stringify(eventData, null, 2));
-      
+      console.info(
+        "Raw live event data being processed:",
+        JSON.stringify(eventData, null, 2),
+      );
+
       // Format event date
       let formattedEventDate = "";
       if (eventData.eventDate) {
-        if (typeof eventData.eventDate === 'string') {
+        if (typeof eventData.eventDate === "string") {
           formattedEventDate = eventData.eventDate;
         } else {
-          formattedEventDate = `${eventData.eventDate.startDate} to ${eventData.eventDate.endDate}`;
+          formattedEventDate =
+            `${eventData.eventDate.startDate} to ${eventData.eventDate.endDate}`;
         }
       }
-      
+
       // Format event formats
-      const eventFormats = Array.isArray(eventData.desiredFormats) 
-        ? eventData.desiredFormats.join(", ") 
+      const eventFormats = Array.isArray(eventData.desiredFormats)
+        ? eventData.desiredFormats.join(", ")
         : "";
-      
+
       // Format event types
-      const eventTypes = eventData.specialEventInfo?.eventTypes?.join(", ") || "";
-      
+      const eventTypes = eventData.specialEventInfo?.eventTypes?.join(", ") ||
+        "";
+
       // Format location information
       const locationType = eventData.locationInfo?.type || "";
       const city = eventData.locationInfo?.city || "";
       const state = eventData.locationInfo?.state || "";
       const locationName = eventData.locationInfo?.locationName || "";
-      
+
       // Format referral information
       const referralSource = eventData.referralInfo?.source || "";
       const referralInfo = eventData.referralInfo?.moreInfo || "";
-      
+
       const timestamp = new Date().toISOString();
-      
+
       // Create row with exact header names that match the Google Sheet
       values = [{
         "Name": eventData.name,
@@ -435,51 +494,118 @@ Deno.serve(async (req: Request): Promise<Response> => {
         "Event Formats": eventFormats,
         "Event Group Type": eventData.specialEventInfo?.type || "",
         "Event Types": eventTypes,
-        "Custom Event Type": eventData.specialEventInfo?.userDefinedEventType || "",
+        "Custom Event Type": eventData.specialEventInfo?.userDefinedEventType ||
+          "",
         "Location Type": locationType,
         "City": city,
         "State": state,
         "Location Name": locationName,
         "Budget": eventData.budget?.toString() || "",
         "Event Date": formattedEventDate,
-        "Interested In Bulk Assessments": eventData.interestedInBulkAssessments === true ? "Yes" : "No",
+        "Interested In Bulk Assessments":
+          eventData.interestedInBulkAssessments === true ? "Yes" : "No",
         "Referral Source": referralSource,
         "Referral Info": referralInfo,
-        "Submission Date": timestamp
+        "Submission Date": timestamp,
       }];
-      
+
       // Log the formatted row for debugging
-      console.info("Formatted row for live event:", JSON.stringify(values[0], null, 2));
+      console.info(
+        "Formatted row for live event:",
+        JSON.stringify(values[0], null, 2),
+      );
+    } else if (data.dataType === "user-signup") {
+      const signupData = data as UserSignupData;
+
+      // Validate required fields for user signups
+      const requiredFields = [
+        "email",
+        "firstName",
+        "lastName",
+        "createdDate",
+      ];
+      const missingFields = requiredFields.filter((field) =>
+        !(field in signupData)
+      );
+
+      if (missingFields.length > 0) {
+        console.error(
+          `Missing required fields for user-signup: ${
+            missingFields.join(", ")
+          }`,
+        );
+        return new Response(
+          JSON.stringify({
+            error: `Missing required fields: ${missingFields.join(", ")}`,
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      // Handle user signup data
+      tabName = "User Signups";
+
+      // Log the raw data for debugging
+      console.info(
+        "Raw user signup data being processed:",
+        JSON.stringify(signupData, null, 2),
+      );
+
+      const timestamp = new Date().toISOString();
+
+      // Create row with exact header names that match the Google Sheet
+      values = [{
+        "Email": signupData.email,
+        "First Name": signupData.firstName,
+        "Last Name": signupData.lastName,
+        "Created Date": signupData.createdDate,
+        "Signup Date": timestamp,
+      }];
+
+      // Log the formatted row for debugging
+      console.info(
+        "Formatted row for user signup:",
+        JSON.stringify(values[0], null, 2),
+      );
     } else {
       console.error(`Unknown data type: ${data.dataType}`);
       return new Response(
-        JSON.stringify({ 
-          error: `Unknown data type: ${data.dataType}` 
+        JSON.stringify({
+          error: `Unknown data type: ${data.dataType}`,
         }),
-        { 
-          status: 400, 
-          headers: { ...corsHeaders, "Content-Type": "application/json" } 
-        }
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        },
       );
     }
 
     console.info("Processed data:", {
       sheetId,
       tabName,
-      values: JSON.stringify(values)
+      values: JSON.stringify(values),
     });
 
     // Get service account credentials using the helper function
     console.info("Attempting to get service account credentials...");
     const serviceAccountCreds = await getServiceAccountCreds();
     console.info("Successfully retrieved service account credentials");
-    console.info("Service account client_email:", serviceAccountCreds.client_email);
-    console.info("Service account private_key length:", serviceAccountCreds.private_key.length);
+    console.info(
+      "Service account client_email:",
+      serviceAccountCreds.client_email,
+    );
+    console.info(
+      "Service account private_key length:",
+      serviceAccountCreds.private_key.length,
+    );
 
     // Initialize the Google Sheets document
     console.info(`Initializing Google Spreadsheet with ID: ${sheetId}...`);
     const doc = new GoogleSpreadsheet(sheetId) as GoogleSpreadsheetType;
-    
+
     // Initialize auth with the service account
     console.info("Authenticating with service account...");
     try {
@@ -490,39 +616,46 @@ Deno.serve(async (req: Request): Promise<Response> => {
       console.info("Authentication successful");
     } catch (authError) {
       console.error("Authentication failed:", (authError as Error).message);
-      const slackMessage = `Google Sheets authentication error: ${(authError as Error).message}`;
+      const slackMessage = `Google Sheets authentication error: ${
+        (authError as Error).message
+      }`;
       await useEdgeRuntimeWaitUntil(notifySlack(slackMessage));
-      
+
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           error: "Authentication with Google Sheets failed",
-          details: (authError as Error).message
+          details: (authError as Error).message,
         }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
       );
     }
-    
+
     console.info("Loading spreadsheet info...");
     try {
       await doc.loadInfo();
       console.info("Spreadsheet loaded successfully:", doc.title);
     } catch (loadError) {
-      console.error("Failed to load spreadsheet info:", (loadError as Error).message);
-      const slackMessage = `Failed to load Google Sheet: ${(loadError as Error).message}`;
+      console.error(
+        "Failed to load spreadsheet info:",
+        (loadError as Error).message,
+      );
+      const slackMessage = `Failed to load Google Sheet: ${
+        (loadError as Error).message
+      }`;
       await useEdgeRuntimeWaitUntil(notifySlack(slackMessage));
-      
+
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           error: "Failed to load spreadsheet",
-          details: (loadError as Error).message
+          details: (loadError as Error).message,
         }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
       );
     }
 
@@ -533,7 +666,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       sheet = doc.sheetsByTitle[tabName];
       if (!sheet) {
         console.info(`Tab "${tabName}" not found`);
-        
+
         // If sheet doesn't exist and we're in append mode, create a new sheet
         if (append) {
           console.info(`Creating new tab "${tabName}" in append mode`);
@@ -550,16 +683,16 @@ Deno.serve(async (req: Request): Promise<Response> => {
       const typedError = error as Error;
       const errorMessage = typedError.message;
       console.error(`Error accessing sheet: ${errorMessage}`);
-      
+
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           error: `Error accessing sheet: ${errorMessage}`,
-          availableTabs: Object.keys(doc.sheetsByTitle || {})
+          availableTabs: Object.keys(doc.sheetsByTitle || {}),
         }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
       );
     }
 
@@ -583,10 +716,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
         if (!Array.isArray(values)) {
           throw new Error("Values must be an array for cell updates");
         }
-        
+
         for (const item of values) {
           if (!Array.isArray(item) || item.length !== 3) {
-            throw new Error("Each value must be an array with [row, col, value] format");
+            throw new Error(
+              "Each value must be an array with [row, col, value] format",
+            );
           }
           const row = item[0] as number;
           const col = item[1] as number;
@@ -610,14 +745,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       await useEdgeRuntimeWaitUntil(notifySlack(slackMessage));
 
       return new Response(
-        JSON.stringify({ 
+        JSON.stringify({
           error: `Error updating sheet: ${errorMessage}`,
-          details: typedError.stack
+          details: typedError.stack,
         }),
         {
           status: 500,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
+        },
       );
     }
 
@@ -633,27 +768,28 @@ Deno.serve(async (req: Request): Promise<Response> => {
       {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      },
     );
   } catch (error) {
     // Notify admin about error via Slack
     const typedError = error as Error;
     const errorMessage = typedError.message;
     console.error("Unexpected error:", errorMessage, typedError.stack);
-    const slackMessage = `Unexpected error in update-colorworks-google-sheet function: ${errorMessage}`;
+    const slackMessage =
+      `Unexpected error in update-colorworks-google-sheet function: ${errorMessage}`;
 
     // Use our helper function for EdgeRuntime waitUntil
     await useEdgeRuntimeWaitUntil(notifySlack(slackMessage));
 
     return new Response(
-      JSON.stringify({ 
-        error: `Unexpected error: ${errorMessage}`, 
-        details: typedError.stack
+      JSON.stringify({
+        error: `Unexpected error: ${errorMessage}`,
+        details: typedError.stack,
       }),
       {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-      }
+      },
     );
   }
 });
